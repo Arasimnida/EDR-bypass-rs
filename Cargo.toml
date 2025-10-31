@@ -1,0 +1,7 @@
+[workspace]
+members = [
+	"direct-syscall",
+	"indirect-syscall",
+	"callstack-obf",
+]
+
