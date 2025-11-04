@@ -2,6 +2,6 @@
 members = [
 	"direct-syscall",
 	"indirect-syscall",
-	"callstack-obf",
+	"callstack-obf", "nt-basic",
 ]
 
