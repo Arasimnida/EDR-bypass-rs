@@ -41,6 +41,8 @@ pub static mut MN_NTWVM: u32 = 0x0;
 pub static mut MN_NTWFSO: u32 = 0x0;
 #[unsafe(no_mangle)]
 pub static mut MN_NTC: u32 = 0x0;
+#[unsafe(no_mangle)]
+pub static mut SYS_ADDR_NTOP: *const u8 = std::ptr::null();
 
 type HANDLE = *mut c_void;
 const MEM_COMMIT: u32 = 0x1000;
@@ -139,6 +141,7 @@ pub fn main() -> windows::core::Result<()> {
                 .expect("GetProcAddress failed for NtOpenProcess");
         let addr_nt_open_process = ntdll_nt_open_process as *const u8;
         MN_NTOP = *addr_nt_open_process.add(4) as u32;
+        SYS_ADDR_NTOP = addr_nt_open_process.add(0x12);
         let openprocess_status = asm_NtOpenProcess(
             &mut h_process as *mut HANDLE,
             desired_access,

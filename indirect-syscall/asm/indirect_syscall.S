@@ -6,6 +6,7 @@
 .extern MN_NTOP
 .extern MN_NTWFSO
 .extern MN_NTC
+.extern SYS_ADDR_NTOP
 
 .globl asm_NtAllocateVirtualMemory
 asm_NtAllocateVirtualMemory:
@@ -25,8 +26,7 @@ asm_NtWriteVirtualMemory:
 asm_NtOpenProcess:
 	mov r10, rcx
 	mov eax, dword ptr [rip + MN_NTOP]
-	syscall
-	ret
+	jmp qword ptr [rip + SYS_ADDR_NTOP]
 
 .globl asm_NtCreateThreadEx
 asm_NtCreateThreadEx:
